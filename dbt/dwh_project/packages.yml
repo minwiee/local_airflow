@@ -1,0 +1,6 @@
+# Package dbt mà model dùng: dbt_date.convert_timezone (giờ hiện tại theo múi giờ Việt Nam).
+# Image Airflow local tải package lúc build (Dockerfile, bước dbt deps) vào /opt/airflow/dbt_packages,
+# nên khi DAG chạy không cần mạng. Đổi phiên bản ở đây thì build lại image: docker compose build.
+packages:
+  - package: godatadriven/dbt_date
+    version: 0.17.2

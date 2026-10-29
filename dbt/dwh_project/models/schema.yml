@@ -1,0 +1,410 @@
+# ---------------------------------------------------------------------------
+# File này do tools/build_dbt_project.py sinh ra. Đừng sửa tay: sửa schema.yml của case
+# trong training/cases/<case>/dbt/ rồi chạy lại công cụ.
+# ---------------------------------------------------------------------------
+# Gộp schema.yml của mọi case: cấu hình (tag, schema, materialized) và test của từng model.
+# Model do DAG khác dựng (không có file .sql trong bộ tài liệu) có model giữ chỗ trong
+# models/ngoai_pham_vi/ để ref() phân giải được.
+# ---------------------------------------------------------------------------
+version: 2
+
+models:
+  # ===== Case 01_branch - Chi nhánh (training/cases/01_branch/dbt/schema.yml)
+
+  - name: vw_init_branch_intf_sap
+    description: Dòng chi nhánh mặc định ZZZZZZZZZ của BRANCH_INTF
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["sbd", "ref", "init", "branch_intf", "src_t24_branch_intf"]
+      materialized: view
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_ref
+
+  - name: stg_branch_intf_t24__snp
+    description: Staging của BRANCH_INTF từ nguồn T24
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["sbd", "stag", "branch_intf", "src_t24_branch_intf"]
+      materialized: table
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_stag
+
+  - name: branch_intf
+    description: Interface chi nhánh (L1)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["sbd", "intf", "branch_intf", "src_t24_branch_intf"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_intf
+    tests:
+      - count_gte_zero:
+          filter_column: "business_date"
+      - unique_value:
+          column_name: "(branch_code || '-' || src_sys_code)"
+          filter_column: "business_date"
+    columns:
+      - name: branch_code
+        tests:
+          - not_null_value:
+              filter_column: "business_date"
+      - name: src_sys_code
+        tests:
+          - not_null_value:
+              filter_column: "business_date"
+
+  - name: tfm_bi_branch_info__mnp
+    description: Biến đổi thông tin chi nhánh cho khối BI (multi snapshot)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["bi", "bi_ref", "tfm_bi_branch_info__mnp", "tfm_of_bi_branch_info_intf"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_data_prod_db_bi') }}"
+      schema: bi_ref
+    tests:
+      - unique_value:
+          column_name: "branch_id"
+          filter_column: "tf_partition_date"
+      - count_gte_zero:
+          filter_column: "tf_partition_date"
+
+  - name: bi_branch_info_intf__mnp
+    description: Interface thông tin chi nhánh của khối BI (layer 2, multi snapshot)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["bi_intf", "bi_branch_info_intf__mnp"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_data_prod_db_bi') }}"
+      schema: bi_intf
+    tests:
+      - unique_value:
+          column_name: "BRANCH_ID"
+          filter_column: "TF_PARTITION_DATE"
+    columns:
+      - name: BRANCH_ID
+        tests:
+          - not_null_value:
+              filter_column: "TF_PARTITION_DATE"
+      - name: TF_PARTITION_DATE
+        tests:
+          - not_null_value:
+              filter_column: "TF_PARTITION_DATE"
+
+  # ===== Case 02_deposit - Tiền gửi (training/cases/02_deposit/dbt/schema.yml)
+
+  - name: stg_ar_x_cl_pst_t24_depo_t24_ld__snp
+    description: Staging xác định hợp đồng LD nào là tiền gửi, kèm trạng thái và các mốc ngày
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["intf", "transform_depo_intf_ar_x_cl_pst", "depo_intf"]
+      materialized: table
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_stag
+
+  - name: stg_ar_depo_t24_ld_prfl__snp
+    description: Staging thuộc tính của hợp đồng LD (khách hàng, loại tiền, đơn vị, lãi suất, số dư)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["intf", "transform_depo_intf_t24_ld", "depo_intf"]
+      materialized: table
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_stag
+
+  - name: depo_intf
+    description: Interface tiền gửi (L1)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["intf", "depo_intf_all", "depo_intf", "depo_intf_test"]
+      materialized: incremental
+      on_schema_change: fail
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_intf
+    tests:
+      - count_gte_zero:
+          filter_column: "business_date"
+    columns:
+      - name: business_date
+        tests:
+          - not_null_value:
+              filter_column: "business_date"
+      - name: contract_nbr
+        tests:
+          - not_null_value:
+              filter_column: "business_date"
+          - unique_value:
+              filter_column: "business_date"
+
+  - name: tfm_bi_depo_prfl__mnp
+    description: Biến đổi thông tin tiền gửi cho khối BI (multi snapshot)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["bi", "bi_ref", "tfm_bi_depo_prfl__mnp"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_data_prod_db_bi') }}"
+      schema: bi_ref
+
+  - name: bi_depo_info_intf__mnp
+    description: Interface thông tin tiền gửi của khối BI (layer 2, multi snapshot)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["bi", "bi_intf", "bi_depo_info_intf__mnp"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_data_prod_db_bi') }}"
+      schema: bi_intf
+    tests:
+      - unique_value:
+          column_name: "CONTRACT_NBR"
+          filter_column: "TF_PARTITION_DATE"
+      - count_gte_zero:
+          filter_column: "tf_partition_date"
+    columns:
+      - name: CONTRACT_NBR
+        tests:
+          - not_null_value:
+              filter_column: "TF_PARTITION_DATE"
+
+  # ===== Case 03_loan - Khoản vay (training/cases/03_loan/dbt/schema.yml)
+
+  - name: tfm_re_crf_sbv__mnp
+    description: Số dư GL theo hợp đồng (do bal_sheet_detail_intf_dag dựng)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["cbd", "intf", "bal_sheet_detail_intf"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_ref
+
+  - name: repay_acty_intf
+    description: Interface giao dịch trả nợ (do repay_acty_intf_dag dựng)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["dwh_intf", "repay_acty_intf"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_intf
+    tests:
+      - unique_value:
+          column_name: (REPAY_ACTY_CODE)
+          filter_column: "BUSINESS_DATE"
+
+  - name: stg_ar_x_cl_pst_t24_loan__snp
+    description: Staging tập hợp đồng vay T24 LD của LOAN_CONTRACT_INTF
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["cbd", "stag", "loan_contract_intf", "src_ld_for_loan_contract_intf"]
+      materialized: table
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_stag
+
+  - name: loan_contract_intf
+    description: Interface hợp đồng vay (L1)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["cbd", "intf", "loan_contract_intf"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_intf
+    tests:
+      - unique_value:
+          column_name: "contract_nbr"
+          filter_column: "business_date"
+      - not_null_value:
+          column_name: "contract_nbr"
+          filter_column: "business_date"
+      - count_gte_zero:
+          filter_column: "business_date"
+
+  - name: bi_lend_repay_info_intf__fa
+    description: Interface thông tin trả nợ vay của khối BI (layer 2, fact append)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["intf_layer_2", "bi_intf", "bi", "bi_lend_repay_info_intf__fa"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_data_prod_db_bi') }}"
+      schema: bi_intf
+    tests:
+      - unique_value:
+          column_name: "(REPAY_ACTY_CODE||'-'||BUSINESS_DATE)"
+          filter_column: "tf_partition_date"
+
+  # ===== Case 04_card - Thẻ (training/cases/04_card/dbt/schema.yml)
+
+  - name: stg_card_intf_way4__snp
+    description: Staging của CARD_INTF từ nguồn Way4
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["cbd", "stag", "card_intf"]
+      materialized: table
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_stag
+
+  - name: card_intf
+    description: Card interface (L1)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["cbd", "intf", "card_intf"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_intf
+    tests:
+      - unique_value:
+          column_name: "uniq_id_in_src_sys"
+          filter_column: "business_date"
+      - count_gte_zero:
+          filter_column: "business_date"
+
+  - name: prd_intf
+    description: Product interface (L1), do prd_intf_dag dựng; khai báo để ref('prd_intf') dùng được
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["cbd", "intf", "prd_intf"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_bu_intf_db') }}"
+      schema: dwh_intf
+    tests:
+      - unique_value:
+          column_name: "(uniq_id_in_src_sys || '-' || SRC_SYS_CODE)"
+          filter_column: "business_date"
+
+  - name: stg_bi_card__snp
+    description: Staging table for BI Card Info Interface (nhánh thẻ, đọc card_intf)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["bi", "stg_bi_card__snp", "bi_stg", "tfm_bi_card_info__mnp"]
+      materialized: table
+      database: "{{ var('src_data_prod_db_bi') }}"
+      schema: bi_stag
+    tests:
+      - unique_value:
+          column_name: "(UNIQ_ID_IN_SRC_SYS)"
+          filter_column: "TF_PARTITION_DATE"
+    columns:
+      - name: UNIQ_ID_IN_SRC_SYS
+        tests:
+          - not_null_value:
+              filter_column: "TF_PARTITION_DATE"
+
+  - name: stg_bi_card_info__snp
+    description: Staging table for BI Card Info Interface (đổi tên cột và loại các thẻ theo quy tắc cứng)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["bi", "stg_bi_card_info__snp", "bi_stg", "tfm_bi_card_info__mnp"]
+      materialized: table
+      database: "{{ var('src_data_prod_db_bi') }}"
+      schema: bi_stag
+    tests:
+      - unique_value:
+          column_name: "(UNIQ_ID_IN_SRC_SYS)"
+          filter_column: "TF_PARTITION_DATE"
+    columns:
+      - name: UNIQ_ID_IN_SRC_SYS
+        tests:
+          - not_null_value:
+              filter_column: "TF_PARTITION_DATE"
+
+  - name: tfm_bi_card_info__mnp
+    description: Biến đổi thông tin thẻ cho khối BI (multi snapshot)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["bi", "bi_ref", "tfm_bi_card_info__mnp", "tfm_of_bi_card_info_intf"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_data_prod_db_bi') }}"
+      schema: bi_ref
+    tests:
+      - unique_value:
+          column_name: "UNIQ_ID_IN_SRC_SYS"
+          filter_column: "TF_PARTITION_DATE"
+      - count_gte_zero:
+          filter_column: "TF_PARTITION_DATE"
+
+  - name: bi_card_info_intf__mnp
+    description: Interface thông tin thẻ của khối BI (layer 2, multi snapshot)
+    meta:
+      owner: ducnm
+      created_date: 2026-10-02
+    config:
+      tags: ["bi_intf", "bi_card_info_intf__mnp"]
+      materialized: incremental
+      incremental_strategy: append
+      on_schema_change: fail
+      database: "{{ var('src_data_prod_db_bi') }}"
+      schema: bi_intf
+    tests:
+      - unique_value:
+          column_name: "(UNIQ_ID_IN_SRC_SYS)"
+          filter_column: "TF_PARTITION_DATE"
+    columns:
+      - name: UNIQ_ID_IN_SRC_SYS
+        tests:
+          - not_null_value:
+              filter_column: "TF_PARTITION_DATE"
+      - name: TF_PARTITION_DATE
+        tests:
+          - not_null_value:
+              filter_column: "TF_PARTITION_DATE"

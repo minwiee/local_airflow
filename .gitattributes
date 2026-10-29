@@ -1,0 +1,8 @@
+# Các file chạy trong container Linux phải giữ xuống dòng LF, kể cả khi Git đặt core.autocrlf true.
+# Script initdb mang CRLF thì postgres báo "bash\r" và không khởi tạo được database.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+airflowignore   text eol=lf
+*.py            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf

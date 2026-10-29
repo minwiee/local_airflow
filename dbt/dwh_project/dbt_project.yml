@@ -1,0 +1,56 @@
+# ---------------------------------------------------------------------------
+# dbt project của Airflow local (DWH)
+# ---------------------------------------------------------------------------
+# Model, macro, generic test và hai file khai báo models/sources.yml, models/schema.yml
+# do tools/build_dbt_project.py dựng từ bộ tài liệu dự án (training/): đừng sửa tay các
+# thư mục models/, macros/, tests/; sửa trong training/ rồi chạy lại công cụ.
+# File này, packages.yml và profiles/ là phần riêng của Airflow local.
+#
+# Kho dữ liệu local là database "dwh" trong container postgres: mọi biến database của
+# dbt project (src_bu_intf_db, src_data_prod_db_bi) trỏ về "dwh", vì dbt-postgres không
+# cho tham chiếu chéo database. Target "prod" (Cosmos và profiles/profiles.yml) làm cho
+# generate_schema_name_for_env dùng đúng schema khai trong schema.yml: dwh_intf, dwh_stag,
+# dwh_ref, bi_ref, bi_stag, bi_intf.
+# ---------------------------------------------------------------------------
+name: 'dwh_project'
+version: '1.0.0'
+config-version: 2
+
+profile: 'dwh'
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
+
+# Package (dbt_date) nằm ngoài thư mục project: image tải sẵn vào /opt/airflow/dbt_packages
+packages-install-path: "{{ env_var('DBT_PACKAGES_INSTALL_PATH', 'dbt_packages') }}"
+
+clean-targets:
+  - "target"
+
+flags:
+  send_anonymous_usage_stats: false
+  warn_error_options:
+    # schema.yml của bộ tài liệu khai tham số generic test ở cấp trên (filter_column: ...), cách viết chạy
+    # được trên mọi bản dbt 1.10. dbt từ 1.10.5 khuyên lồng tham số dưới "arguments:" và in cảnh báo này
+    # cho từng test; tắt ở Airflow local để log task Cosmos dễ đọc.
+    silence:
+      - MissingArgumentsPropertyInGenericTestDeprecation
+
+models:
+  dwh_project:
+    +materialized: view
+
+vars:
+  "dbt_date:time_zone": "Asia/Ho_Chi_Minh"
+  # Database của các lớp dữ liệu: ở Airflow local tất cả nằm trong database dwh
+  src_bu_intf_db: "dwh"
+  src_data_prod_db_bi: "dwh"
+  # Biến DAG truyền vào qua Cosmos (operator_args "vars"). Không đặt mặc định cho business_date
+  # và pre_last_wk_day: chạy dbt mà quên truyền thì dbt báo thiếu biến thay vì chạy sai ngày.
+  run_id: "manual"
+  model_branch: ""
+  tbls_data_date: {}

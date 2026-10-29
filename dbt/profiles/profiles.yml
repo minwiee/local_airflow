@@ -1,0 +1,24 @@
+# ---------------------------------------------------------------------------
+# Profile dbt cho lệnh dbt chạy tay trong container airflow (Airflow local)
+# ---------------------------------------------------------------------------
+# Container đặt DBT_PROFILES_DIR=/opt/airflow/dbt_profiles (thư mục này, mount chỉ đọc), nên:
+#   docker compose exec airflow /opt/airflow/dbt_venv/bin/dbt debug
+# DAG không dùng file này: Cosmos dựng profile "dwh" target "prod" từ Airflow connection
+# postgres-dwh-prd-db hoặc postgres-bi-prd-db (PostgresUserPasswordProfileMapping).
+# Hai cách cùng trỏ về database dwh trong container postgres. User và mật khẩu airflow chỉ
+# dùng cho môi trường local; đổi qua biến môi trường DWH_LOCAL_USER, DWH_LOCAL_PASSWORD.
+# Target tên "prod" để generate_schema_name_for_env ghi model vào đúng schema khai trong
+# schema.yml (dwh_intf, bi_intf...), giống DAG.
+# ---------------------------------------------------------------------------
+dwh:
+  target: prod
+  outputs:
+    prod:
+      type: postgres
+      host: "{{ env_var('DWH_LOCAL_HOST', 'postgres') }}"
+      port: 5432
+      user: "{{ env_var('DWH_LOCAL_USER', 'airflow') }}"
+      password: "{{ env_var('DWH_LOCAL_PASSWORD', 'airflow') }}"
+      dbname: dwh
+      schema: public
+      threads: 4

@@ -1,0 +1,111 @@
+# Airflow 2.10 + dbt + Cosmos chạy local cho nhóm DWH.
+# - postgres: metadata của Airflow (db airflow), database điều khiển (db log_db, schema dwh_ctrl)
+#   và kho dữ liệu local (db dwh) nạp từ bộ tài liệu dự án ../training khi volume được tạo lần đầu.
+# - airflow : image build từ Dockerfile (Airflow 2.10.5, astronomer-cosmos, dbt-core và dbt-postgres 1.10
+#   trong virtualenv /opt/airflow/dbt_venv). Một container chạy cả scheduler (LocalExecutor) và
+#   webserver http://localhost:8080 (admin/admin).
+# DAG trong container (mount chỉ đọc, sửa file trên máy thì Airflow tự nạp lại sau khoảng 30 giây):
+# - project_dags/dwh_intf: 4 DAG interface L1; project_dags/bu_intf_layer_2/bi: 4 DAG layer 2 của khối BI;
+# - project_dags/integration: mark_fail_running_dag và master_trigger_dag của dự án;
+# - project_dags/utils: hằng số và hàm dùng chung (dags/utils/...);
+# - dags: các DAG demo.
+# dbt project: dbt/dwh_project (mount chỉ đọc); manifest.json sinh bằng "dbt parse" mỗi lần container khởi động.
+# Tài khoản và mật khẩu ở đây chỉ dùng cho môi trường local.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+      # current_date, current_timestamp theo giờ Việt Nam, khớp data_date của DAG
+      # (riêng database dwh đặt timezone UTC, xem initdb/03_dwh_warehouse.sh)
+      TZ: Asia/Ho_Chi_Minh
+      PGTZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+      # Bộ tài liệu dự án: initdb/03_dwh_warehouse.sh chạy common/sql và cases/*/sql để nạp database dwh
+      - ../training:/kit:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      # Kiểm tra qua TCP (-h 127.0.0.1): lúc chạy script initdb, Postgres tạm chỉ mở Unix socket,
+      # nên container chỉ healthy (airflow mới khởi động) sau khi initdb nạp xong log_db và dwh
+      test: ["CMD", "pg_isready", "-U", "airflow", "-h", "127.0.0.1"]
+      interval: 5s
+      retries: 60
+
+  airflow:
+    build: .
+    image: dwh-airflow-local:2.10.5
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # healthy khi webserver trả lời /health và scheduler có heartbeat gần đây
+      # (khoảng 1 đến 2 phút sau khi container khởi động: tạo connection, dbt parse, rồi mới bật scheduler)
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health | python -c \"import json, sys; sys.exit(json.load(sys.stdin)['scheduler']['status'] != 'healthy')\""]
+      interval: 30s
+      timeout: 15s
+      start_period: 180s
+      retries: 5
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Ho_Chi_Minh
+      AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Asia/Ho_Chi_Minh
+      # Nút ▶ mở menu "Trigger DAG" / "Trigger DAG w/ config"; mục sau cho chọn Logical date
+      # (mặc định Airflow 2.10 trigger ngay với giờ hiện tại khi DAG không có params)
+      AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: "True"
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"
+      AIRFLOW__WEBSERVER__SECRET_KEY: local-airflow-only
+      # Không gửi số liệu sử dụng ra ngoài: DAG chạy được khi máy không có mạng
+      AIRFLOW__COSMOS__ENABLE_TELEMETRY: "False"
+      AIRFLOW__USAGE_DATA_COLLECTION__ENABLED: "False"
+      SCARF_ANALYTICS: "false"
+      DO_NOT_TRACK: "true"
+      # Parse file DAG có DbtTaskGroup (đọc manifest) mất vài giây
+      AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "120"
+      AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: "180"
+      # dbt chạy tay trong container: docker compose exec airflow /opt/airflow/dbt_venv/bin/dbt <lệnh>
+      DBT_PROJECT_DIR: /opt/airflow/dags/dbt/dwh_project
+      DBT_PROFILES_DIR: /opt/airflow/dbt_profiles
+      DBT_TARGET_PATH: /opt/airflow/artifact
+      DBT_LOG_PATH: /opt/airflow/logs/dbt
+    volumes:
+      - ./project_dags/utils:/opt/airflow/dags/utils:ro
+      - ./project_dags/dwh_intf:/opt/airflow/dags/dwh_intf:ro
+      - ./project_dags/bu_intf_layer_2:/opt/airflow/dags/bu_intf_layer_2:ro
+      # master_trigger_dag: 2 phút/lần trigger các job trong dwh_ctrl.cstb_job_run_list (mặc định bảng trống, không trigger gì)
+      - ./project_dags/integration:/opt/airflow/dags/integration:ro
+      - ./dags:/opt/airflow/dags/demo:ro
+      - ./airflowignore:/opt/airflow/dags/.airflowignore:ro
+      - ./dbt/dwh_project:/opt/airflow/dags/dbt/dwh_project:ro
+      - ./dbt/profiles:/opt/airflow/dbt_profiles:ro
+      # Công cụ nạp lại dữ liệu test và so kết quả (tools/dwh_kit.py) đọc bộ tài liệu dự án
+      - ./tools:/opt/airflow/tools:ro
+      - ../training:/opt/airflow/kit:ro
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate
+        airflow users create --username admin --password admin --firstname Local --lastname Admin --role Admin --email admin@example.local || true
+        airflow connections delete postgres-dwh-ctrl || true
+        airflow connections add postgres-dwh-ctrl --conn-type postgres --conn-host postgres --conn-port 5432 --conn-login airflow --conn-password airflow --conn-schema log_db
+        # Cosmos dựng profile dbt từ hai connection này (database dwh): DAG L1 dùng postgres-dwh-prd-db, DAG layer 2 dùng postgres-bi-prd-db
+        airflow connections delete postgres-dwh-prd-db || true
+        airflow connections add postgres-dwh-prd-db --conn-type postgres --conn-host postgres --conn-port 5432 --conn-login airflow --conn-password airflow --conn-schema dwh
+        airflow connections delete postgres-bi-prd-db || true
+        airflow connections add postgres-bi-prd-db --conn-type postgres --conn-host postgres --conn-port 5432 --conn-login airflow --conn-password airflow --conn-schema dwh
+        airflow variables set dag-process-count 10
+        # manifest.json cho Cosmos (LoadMode.DBT_MANIFEST): /opt/airflow/artifact/manifest.json
+        mkdir -p /opt/airflow/logs/dbt
+        /opt/airflow/dbt_venv/bin/dbt parse --quiet || echo "dbt parse lỗi: DAG có DbtTaskGroup sẽ báo import error, xem README mục Sinh lại manifest"
+        airflow scheduler &
+        exec airflow webserver

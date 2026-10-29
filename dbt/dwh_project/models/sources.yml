@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# File này do tools/build_dbt_project.py sinh ra. Đừng sửa tay: sửa sources.yml của case
+# trong training/cases/<case>/dbt/ rồi chạy lại công cụ.
+# ---------------------------------------------------------------------------
+# Gộp sources.yml của mọi case. Bảng khai ở nhiều case chỉ giữ một lần, chú thích ghi
+# các case dùng bảng. Bảng ghi "Airflow local" là nguồn mà dbt project trung tâm có sẵn
+# nhưng bộ tài liệu không khai (generic test đọc qua macro futils_test_should_run).
+# ---------------------------------------------------------------------------
+version: 2
+
+sources:
+  - name: dwh_staging
+    database: "{{ var('src_bu_intf_db') }}"
+    schema: dwh_stag_eod
+    tables:
+      # case: 01_branch
+      - name: raw_t24_bank_company
+        identifier: stg_raw_t24_bank_company__mnp
+      # case: 01_branch
+      - name: raw_t24_bank_company_details
+        identifier: stg_raw_t24_bank_company_details__mnp
+      # case: 01_branch
+      - name: raw_t24_bank_province_details
+        identifier: stg_raw_t24_bank_province_details__mnp
+
+  - name: eod_shared
+    database: "{{ var('src_bu_intf_db') }}"
+    schema: raw_eod
+    tables:
+      # case: 01_branch
+      - name: raw_t24_company
+        identifier: t24_company__s2
+      # case: 02_deposit, 03_loan
+      - name: raw_t24_ld_loans_and_depo
+        identifier: t24_ld_loans_and_depo__mnp
+      # case: 02_deposit, 03_loan
+      - name: raw_t24_ld_loans_and_depo_details
+        identifier: t24_ld_loans_and_depo_details__mnp
+      # case: 04_card
+      - name: raw_way4_acnt_contract
+        identifier: way4_acnt_contract__mnp
+      # case: 04_card
+      - name: raw_way4_appl_product
+        identifier: way4_appl_product__mnp
+      # case: 04_card
+      - name: raw_way4_appl_pr_group
+        identifier: way4_appl_pr_group__s2
+      # case: 04_card
+      - name: raw_way4_contr_status
+        identifier: way4_contr_status__mnp
+
+  - name: dwh_ref
+    database: "{{ var('src_bu_intf_db') }}"
+    schema: dwh_ref
+    tables:
+      # case: 01_branch
+      - name: raw_csv_cv
+        identifier: csv_cv__mnp
+      # case: 02_deposit, 03_loan
+      - name: raw_csv_ma_map_cgy_ar_tp
+        identifier: csv_ma_map_cgy_ar_tp__mnp
+      # Airflow local: bật/tắt generic test theo model và loại test (futils_test_should_run)
+      - name: raw_test_case_config
+        identifier: test_case_config
+
+  - name: bi_ref
+    database: "{{ var('src_data_prod_db_bi') }}"
+    schema: bi_ref
+    tables:
+      # case: 01_branch
+      - name: raw_csv_ma_rbd_branch_area
+        identifier: csv_ma_rbd_branch_area__mnp
+      # case: 02_deposit
+      - name: raw_csv_partb_product
+        identifier: csv_partb_product__mnp
+
+  - name: raw_eod_common
+    database: "{{ var('src_bu_intf_db') }}"
+    schema: raw_eod
+    tables:
+      # Airflow local: lịch ngày nghỉ T24, test có is_enable_holiday = false bỏ qua ngày nghỉ
+      - name: raw_t24_holiday
+        identifier: t24_holiday__snp
