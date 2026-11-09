@@ -6,9 +6,12 @@
 #                 - on_failure_callback chỉ ghi log, không gửi thông báo;
 #                 - dbt project, manifest và dbt là bản của Airflow local (dbt/dwh_project,
 #                   /opt/airflow/artifact/manifest.json, /opt/airflow/dbt_venv/bin/dbt);
-#                 - profile dbt dựng từ connection PostgreSQL trỏ vào database dwh của container postgres.
+#                 - profile dbt dựng từ connection PostgreSQL trỏ vào database dwh của container postgres;
+#                 - sensor chờ nguồn báo lỗi ngay khi business date không có log nguồn nào
+#                   (dữ liệu test chỉ có 2026-09-29 và 2026-09-30), thay vì chờ hết P_TIMEOUT.
 #----------------------------------------------------------------------
 
+from airflow.exceptions import AirflowFailException
 from airflow.models import Variable
 from cosmos import ProjectConfig, ProfileConfig, ExecutionConfig
 from cosmos.constants import TestIndirectSelection
@@ -24,16 +27,24 @@ DBT_PROJECT_PATH = "/opt/airflow/dags/dbt/dwh_project"
 DBT_MANIFEST_PATH = "/opt/airflow/artifact/manifest.json"   # sinh bằng dbt parse khi container khởi động
 DBT_EXECUTABLE_PATH = "/opt/airflow/dbt_venv/bin/dbt"       # dbt-core, dbt-postgres 1.10 trong virtualenv riêng
 
-# Câu của SqlSensor chờ nguồn: true khi mọi job_waiting của DAG (khớp prefix src_stm) đã có log success
+# Câu của SqlSensor chờ nguồn: true khi mọi job_waiting của DAG (khớp prefix src_stm) đã có log success.
+# Riêng Airflow local: trả NULL khi business date không có dòng log nguồn (project eod) nào, để
+# _success_criteria báo lỗi ngay thay vì chờ tới P_TIMEOUT cho một ngày không có dữ liệu test.
 SQL_CHECK_EOD_LOG = """
             with table_unready as(
                 select count(distinct a.job_name) as num_unready
                 from dwh_ctrl.cstb_etl_waiting a
                 left join dwh_ctrl.log_etl_table b on a.job_waiting = b.job_name and b.data_date = '{{ dag_run.logical_date.astimezone(dag.timezone) | ds }}' and b.status_name = 'success'
                 where a.job_name || '_' || (case when src_stm = 'all' then '' else src_stm end) in ('{{ dag.dag_id }}' || '{{ params.prefix }}') and lower(a.status) = 'a' and b.job_name is null
+            ), test_data as (
+                select exists (
+                    select 1 from dwh_ctrl.log_etl_table
+                    where project_name = 'eod' and data_date = '{{ dag_run.logical_date.astimezone(dag.timezone) | ds }}'
+                ) as has_source_log
             )
-            select case when num_unready = 0 then true else false end
-            from table_unready
+            select case when not test_data.has_source_log then null
+                        when num_unready = 0 then true else false end
+            from table_unready, test_data
         """
 
 
@@ -47,6 +58,13 @@ def on_failure_callback(context):
 
 
 def _success_criteria(record):
+    if record is None:
+        # AirflowFailException: task fail ngay, không retry; log_insert_task vẫn ghi status_flag 3
+        raise AirflowFailException(
+            "Business date của run không có log nguồn nào trong dwh_ctrl.log_etl_table: dữ liệu test "
+            "chỉ có ngày 2026-09-29 và 2026-09-30. Trigger lại bằng 'Trigger DAG w/ config' với Logical "
+            "date 2026-09-29T00:00:00+07:00 hoặc 2026-09-30T00:00:00+07:00."
+        )
     return record
 
 

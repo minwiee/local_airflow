@@ -1,0 +1,22 @@
+{
+  "case": "04_card",
+  "title": "Thẻ",
+  "business_dates": ["2026-09-29", "2026-09-30"],
+  "testcase_prefix": "TC04_",
+  "steps": [
+    {
+      "title": "L1: EOD Way4 -> dwh_intf.card_intf",
+      "dag_id": "card_intf_dag",
+      "models": ["stg_card_intf_way4__snp", "card_intf"]
+    },
+    {
+      "title": "Layer 2: dwh_intf.card_intf + dwh_intf.prd_intf -> bi_intf.bi_card_info_intf__mnp",
+      "dag_id": "bi_card_info_intf__mnp_dag",
+      "models": ["stg_bi_card__snp", "stg_bi_card_info__snp", "tfm_bi_card_info__mnp", "bi_card_info_intf__mnp"]
+    }
+  ],
+  "expected_filter": {
+    "dwh_intf.card_intf": "business_date",
+    "bi_intf.bi_card_info_intf__mnp": "tf_partition_date"
+  }
+}

@@ -6,3 +6,6 @@ airflowignore   text eol=lf
 *.py            text eol=lf
 *.yml           text eol=lf
 *.yaml          text eol=lf
+# warehouse/ là bản chép nguyên từng byte từ bộ tài liệu dự án (tools/build_warehouse.py): Git không đổi
+# xuống dòng của các file ở đây (SQL sinh sẵn mang CRLF, file khác LF), để chúng luôn khớp bộ tài liệu.
+warehouse/**    -text

@@ -1,0 +1,26 @@
+{
+  "case": "02_deposit",
+  "title": "Tiền gửi",
+  "business_dates": ["2026-09-29", "2026-09-30"],
+  "testcase_prefix": "TC02_",
+  "vars_by_date": {
+    "2026-09-29": {"pre_last_wk_day": "2026-09-28"},
+    "2026-09-30": {"pre_last_wk_day": "2026-09-29"}
+  },
+  "steps": [
+    {
+      "title": "L1: EOD T24 LD -> dwh_intf.depo_intf",
+      "dag_id": "depo_intf_dag",
+      "models": ["stg_ar_x_cl_pst_t24_depo_t24_ld__snp", "stg_ar_depo_t24_ld_prfl__snp", "depo_intf"]
+    },
+    {
+      "title": "Layer 2: dwh_intf.depo_intf + file MA nhóm sản phẩm -> bi_intf.bi_depo_info_intf__mnp",
+      "dag_id": "bi_depo_info_intf__mnp_dag",
+      "models": ["tfm_bi_depo_prfl__mnp", "bi_depo_info_intf__mnp"]
+    }
+  ],
+  "expected_filter": {
+    "dwh_intf.depo_intf": "business_date",
+    "bi_intf.bi_depo_info_intf__mnp": "tf_partition_date"
+  }
+}

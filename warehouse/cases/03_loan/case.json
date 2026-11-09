@@ -1,0 +1,22 @@
+{
+  "case": "03_loan",
+  "title": "Khoản vay",
+  "business_dates": ["2026-09-29", "2026-09-30"],
+  "testcase_prefix": "TC03_",
+  "steps": [
+    {
+      "title": "L1: EOD T24 LD + map category + số dư GL -> dwh_intf.loan_contract_intf",
+      "dag_id": "loan_contract_intf_dag",
+      "models": ["stg_ar_x_cl_pst_t24_loan__snp", "loan_contract_intf"]
+    },
+    {
+      "title": "Layer 2: dwh_intf.repay_acty_intf + dwh_intf.loan_contract_intf -> bi_intf.bi_lend_repay_info_intf__fa",
+      "dag_id": "bi_lend_repay_info_intf__fa_dag",
+      "models": ["bi_lend_repay_info_intf__fa"]
+    }
+  ],
+  "expected_filter": {
+    "dwh_intf.loan_contract_intf": "business_date",
+    "bi_intf.bi_lend_repay_info_intf__fa": "tf_partition_date"
+  }
+}

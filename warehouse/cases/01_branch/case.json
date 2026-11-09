@@ -1,0 +1,23 @@
+{
+  "case": "01_branch",
+  "title": "Chi nhánh",
+  "business_dates": ["2026-09-29", "2026-09-30"],
+  "testcase_prefix": "TC01_",
+  "vars": {"model_branch": "T24_BANK_COMPANY"},
+  "steps": [
+    {
+      "title": "L1: EOD T24 -> dwh_intf.branch_intf",
+      "dag_id": "branch_intf_dag",
+      "models": ["vw_init_branch_intf_sap", "stg_branch_intf_t24__snp", "branch_intf"]
+    },
+    {
+      "title": "Layer 2: dwh_intf.branch_intf + file MA -> bi_intf.bi_branch_info_intf__mnp",
+      "dag_id": "bi_branch_info_intf__mnp_dag",
+      "models": ["tfm_bi_branch_info__mnp", "bi_branch_info_intf__mnp"]
+    }
+  ],
+  "expected_filter": {
+    "dwh_intf.branch_intf": "business_date",
+    "bi_intf.bi_branch_info_intf__mnp": "tf_partition_date"
+  }
+}

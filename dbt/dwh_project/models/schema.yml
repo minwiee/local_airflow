@@ -3,6 +3,8 @@
 # trong training/cases/<case>/dbt/ rồi chạy lại công cụ.
 # ---------------------------------------------------------------------------
 # Gộp schema.yml của mọi case: cấu hình (tag, schema, materialized) và test của từng model.
+# Tham số của generic test (filter_column, column_name...) được lồng dưới "arguments:" theo
+# cách khai dbt hỗ trợ từ 1.10.5; tên test và tham số giữ nguyên như schema.yml của case.
 # Model do DAG khác dựng (không có file .sql trong bộ tài liệu) có model giữ chỗ trong
 # models/ngoai_pham_vi/ để ref() phân giải được.
 # ---------------------------------------------------------------------------
@@ -47,19 +49,23 @@ models:
       schema: dwh_intf
     tests:
       - count_gte_zero:
-          filter_column: "business_date"
+          arguments:
+            filter_column: "business_date"
       - unique_value:
-          column_name: "(branch_code || '-' || src_sys_code)"
-          filter_column: "business_date"
+          arguments:
+            column_name: "(branch_code || '-' || src_sys_code)"
+            filter_column: "business_date"
     columns:
       - name: branch_code
         tests:
           - not_null_value:
-              filter_column: "business_date"
+              arguments:
+                filter_column: "business_date"
       - name: src_sys_code
         tests:
           - not_null_value:
-              filter_column: "business_date"
+              arguments:
+                filter_column: "business_date"
 
   - name: tfm_bi_branch_info__mnp
     description: Biến đổi thông tin chi nhánh cho khối BI (multi snapshot)
@@ -75,10 +81,12 @@ models:
       schema: bi_ref
     tests:
       - unique_value:
-          column_name: "branch_id"
-          filter_column: "tf_partition_date"
+          arguments:
+            column_name: "branch_id"
+            filter_column: "tf_partition_date"
       - count_gte_zero:
-          filter_column: "tf_partition_date"
+          arguments:
+            filter_column: "tf_partition_date"
 
   - name: bi_branch_info_intf__mnp
     description: Interface thông tin chi nhánh của khối BI (layer 2, multi snapshot)
@@ -94,17 +102,20 @@ models:
       schema: bi_intf
     tests:
       - unique_value:
-          column_name: "BRANCH_ID"
-          filter_column: "TF_PARTITION_DATE"
+          arguments:
+            column_name: "BRANCH_ID"
+            filter_column: "TF_PARTITION_DATE"
     columns:
       - name: BRANCH_ID
         tests:
           - not_null_value:
-              filter_column: "TF_PARTITION_DATE"
+              arguments:
+                filter_column: "TF_PARTITION_DATE"
       - name: TF_PARTITION_DATE
         tests:
           - not_null_value:
-              filter_column: "TF_PARTITION_DATE"
+              arguments:
+                filter_column: "TF_PARTITION_DATE"
 
   # ===== Case 02_deposit - Tiền gửi (training/cases/02_deposit/dbt/schema.yml)
 
@@ -143,18 +154,22 @@ models:
       schema: dwh_intf
     tests:
       - count_gte_zero:
-          filter_column: "business_date"
+          arguments:
+            filter_column: "business_date"
     columns:
       - name: business_date
         tests:
           - not_null_value:
-              filter_column: "business_date"
+              arguments:
+                filter_column: "business_date"
       - name: contract_nbr
         tests:
           - not_null_value:
-              filter_column: "business_date"
+              arguments:
+                filter_column: "business_date"
           - unique_value:
-              filter_column: "business_date"
+              arguments:
+                filter_column: "business_date"
 
   - name: tfm_bi_depo_prfl__mnp
     description: Biến đổi thông tin tiền gửi cho khối BI (multi snapshot)
@@ -183,15 +198,18 @@ models:
       schema: bi_intf
     tests:
       - unique_value:
-          column_name: "CONTRACT_NBR"
-          filter_column: "TF_PARTITION_DATE"
+          arguments:
+            column_name: "CONTRACT_NBR"
+            filter_column: "TF_PARTITION_DATE"
       - count_gte_zero:
-          filter_column: "tf_partition_date"
+          arguments:
+            filter_column: "tf_partition_date"
     columns:
       - name: CONTRACT_NBR
         tests:
           - not_null_value:
-              filter_column: "TF_PARTITION_DATE"
+              arguments:
+                filter_column: "TF_PARTITION_DATE"
 
   # ===== Case 03_loan - Khoản vay (training/cases/03_loan/dbt/schema.yml)
 
@@ -222,8 +240,9 @@ models:
       schema: dwh_intf
     tests:
       - unique_value:
-          column_name: (REPAY_ACTY_CODE)
-          filter_column: "BUSINESS_DATE"
+          arguments:
+            column_name: (REPAY_ACTY_CODE)
+            filter_column: "BUSINESS_DATE"
 
   - name: stg_ar_x_cl_pst_t24_loan__snp
     description: Staging tập hợp đồng vay T24 LD của LOAN_CONTRACT_INTF
@@ -250,13 +269,16 @@ models:
       schema: dwh_intf
     tests:
       - unique_value:
-          column_name: "contract_nbr"
-          filter_column: "business_date"
+          arguments:
+            column_name: "contract_nbr"
+            filter_column: "business_date"
       - not_null_value:
-          column_name: "contract_nbr"
-          filter_column: "business_date"
+          arguments:
+            column_name: "contract_nbr"
+            filter_column: "business_date"
       - count_gte_zero:
-          filter_column: "business_date"
+          arguments:
+            filter_column: "business_date"
 
   - name: bi_lend_repay_info_intf__fa
     description: Interface thông tin trả nợ vay của khối BI (layer 2, fact append)
@@ -272,8 +294,9 @@ models:
       schema: bi_intf
     tests:
       - unique_value:
-          column_name: "(REPAY_ACTY_CODE||'-'||BUSINESS_DATE)"
-          filter_column: "tf_partition_date"
+          arguments:
+            column_name: "(REPAY_ACTY_CODE||'-'||BUSINESS_DATE)"
+            filter_column: "tf_partition_date"
 
   # ===== Case 04_card - Thẻ (training/cases/04_card/dbt/schema.yml)
 
@@ -302,10 +325,12 @@ models:
       schema: dwh_intf
     tests:
       - unique_value:
-          column_name: "uniq_id_in_src_sys"
-          filter_column: "business_date"
+          arguments:
+            column_name: "uniq_id_in_src_sys"
+            filter_column: "business_date"
       - count_gte_zero:
-          filter_column: "business_date"
+          arguments:
+            filter_column: "business_date"
 
   - name: prd_intf
     description: Product interface (L1), do prd_intf_dag dựng; khai báo để ref('prd_intf') dùng được
@@ -321,8 +346,9 @@ models:
       schema: dwh_intf
     tests:
       - unique_value:
-          column_name: "(uniq_id_in_src_sys || '-' || SRC_SYS_CODE)"
-          filter_column: "business_date"
+          arguments:
+            column_name: "(uniq_id_in_src_sys || '-' || SRC_SYS_CODE)"
+            filter_column: "business_date"
 
   - name: stg_bi_card__snp
     description: Staging table for BI Card Info Interface (nhánh thẻ, đọc card_intf)
@@ -336,13 +362,15 @@ models:
       schema: bi_stag
     tests:
       - unique_value:
-          column_name: "(UNIQ_ID_IN_SRC_SYS)"
-          filter_column: "TF_PARTITION_DATE"
+          arguments:
+            column_name: "(UNIQ_ID_IN_SRC_SYS)"
+            filter_column: "TF_PARTITION_DATE"
     columns:
       - name: UNIQ_ID_IN_SRC_SYS
         tests:
           - not_null_value:
-              filter_column: "TF_PARTITION_DATE"
+              arguments:
+                filter_column: "TF_PARTITION_DATE"
 
   - name: stg_bi_card_info__snp
     description: Staging table for BI Card Info Interface (đổi tên cột và loại các thẻ theo quy tắc cứng)
@@ -356,13 +384,15 @@ models:
       schema: bi_stag
     tests:
       - unique_value:
-          column_name: "(UNIQ_ID_IN_SRC_SYS)"
-          filter_column: "TF_PARTITION_DATE"
+          arguments:
+            column_name: "(UNIQ_ID_IN_SRC_SYS)"
+            filter_column: "TF_PARTITION_DATE"
     columns:
       - name: UNIQ_ID_IN_SRC_SYS
         tests:
           - not_null_value:
-              filter_column: "TF_PARTITION_DATE"
+              arguments:
+                filter_column: "TF_PARTITION_DATE"
 
   - name: tfm_bi_card_info__mnp
     description: Biến đổi thông tin thẻ cho khối BI (multi snapshot)
@@ -378,10 +408,12 @@ models:
       schema: bi_ref
     tests:
       - unique_value:
-          column_name: "UNIQ_ID_IN_SRC_SYS"
-          filter_column: "TF_PARTITION_DATE"
+          arguments:
+            column_name: "UNIQ_ID_IN_SRC_SYS"
+            filter_column: "TF_PARTITION_DATE"
       - count_gte_zero:
-          filter_column: "TF_PARTITION_DATE"
+          arguments:
+            filter_column: "TF_PARTITION_DATE"
 
   - name: bi_card_info_intf__mnp
     description: Interface thông tin thẻ của khối BI (layer 2, multi snapshot)
@@ -397,14 +429,17 @@ models:
       schema: bi_intf
     tests:
       - unique_value:
-          column_name: "(UNIQ_ID_IN_SRC_SYS)"
-          filter_column: "TF_PARTITION_DATE"
+          arguments:
+            column_name: "(UNIQ_ID_IN_SRC_SYS)"
+            filter_column: "TF_PARTITION_DATE"
     columns:
       - name: UNIQ_ID_IN_SRC_SYS
         tests:
           - not_null_value:
-              filter_column: "TF_PARTITION_DATE"
+              arguments:
+                filter_column: "TF_PARTITION_DATE"
       - name: TF_PARTITION_DATE
         tests:
           - not_null_value:
-              filter_column: "TF_PARTITION_DATE"
+              arguments:
+                filter_column: "TF_PARTITION_DATE"

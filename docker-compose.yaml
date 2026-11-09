@@ -1,6 +1,7 @@
 # Airflow 2.10 + dbt + Cosmos chạy local cho nhóm DWH.
 # - postgres: metadata của Airflow (db airflow), database điều khiển (db log_db, schema dwh_ctrl)
-#   và kho dữ liệu local (db dwh) nạp từ bộ tài liệu dự án ../training khi volume được tạo lần đầu.
+#   và kho dữ liệu local (db dwh) nạp từ ./warehouse (DDL và dữ liệu test chép từ bộ tài liệu dự án)
+#   khi volume được tạo lần đầu. Mọi mount đều nằm trong thư mục này: không cần gì ngoài local_airflow.
 # - airflow : image build từ Dockerfile (Airflow 2.10.5, astronomer-cosmos, dbt-core và dbt-postgres 1.10
 #   trong virtualenv /opt/airflow/dbt_venv). Một container chạy cả scheduler (LocalExecutor) và
 #   webserver http://localhost:8080 (admin/admin).
@@ -25,8 +26,8 @@ services:
       PGTZ: Asia/Ho_Chi_Minh
     volumes:
       - ./initdb:/docker-entrypoint-initdb.d:ro
-      # Bộ tài liệu dự án: initdb/03_dwh_warehouse.sh chạy common/sql và cases/*/sql để nạp database dwh
-      - ../training:/kit:ro
+      # DDL và dữ liệu test của database dwh: initdb/03_dwh_warehouse.sh chạy warehouse/ddl rồi warehouse/cases/*
+      - ./warehouse:/warehouse:ro
     ports:
       - "5433:5432"
     healthcheck:
@@ -87,9 +88,9 @@ services:
       - ./airflowignore:/opt/airflow/dags/.airflowignore:ro
       - ./dbt/dwh_project:/opt/airflow/dags/dbt/dwh_project:ro
       - ./dbt/profiles:/opt/airflow/dbt_profiles:ro
-      # Công cụ nạp lại dữ liệu test và so kết quả (tools/dwh_kit.py) đọc bộ tài liệu dự án
+      # Công cụ nạp lại dữ liệu test và so kết quả (tools/dwh_kit.py) đọc warehouse/
       - ./tools:/opt/airflow/tools:ro
-      - ../training:/opt/airflow/kit:ro
+      - ./warehouse:/opt/airflow/warehouse:ro
     command:
       - bash
       - -c

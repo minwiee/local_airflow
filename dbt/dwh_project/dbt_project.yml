@@ -31,14 +31,10 @@ packages-install-path: "{{ env_var('DBT_PACKAGES_INSTALL_PATH', 'dbt_packages') 
 clean-targets:
   - "target"
 
+# Tham số generic test trong models/schema.yml đã lồng dưới "arguments:" (tools/build_dbt_project.py
+# lồng khi dựng), nên dbt 1.10 không in cảnh báo MissingArgumentsPropertyInGenericTestDeprecation.
 flags:
   send_anonymous_usage_stats: false
-  warn_error_options:
-    # schema.yml của bộ tài liệu khai tham số generic test ở cấp trên (filter_column: ...), cách viết chạy
-    # được trên mọi bản dbt 1.10. dbt từ 1.10.5 khuyên lồng tham số dưới "arguments:" và in cảnh báo này
-    # cho từng test; tắt ở Airflow local để log task Cosmos dễ đọc.
-    silence:
-      - MissingArgumentsPropertyInGenericTestDeprecation
 
 models:
   dwh_project:
@@ -54,3 +50,4 @@ vars:
   run_id: "manual"
   model_branch: ""
   tbls_data_date: {}
+  business_date: "2026-09-30"

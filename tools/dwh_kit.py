@@ -2,12 +2,14 @@
 # ---------------------------------------------------------------------------
 # DWH - nạp lại dữ liệu test và so kết quả DAG với bộ tài liệu dự án (Airflow local)
 # ---------------------------------------------------------------------------
-# Chạy trong container airflow (cần psycopg2 của image Airflow); bộ tài liệu dự án mount
-# chỉ đọc tại /opt/airflow/kit, thư mục tools/ mount tại /opt/airflow/tools:
+# Chạy trong container airflow (cần psycopg2 của image Airflow); thư mục warehouse/ của local_airflow
+# (DDL, dữ liệu test, kết quả mong đợi và test QA chép nguyên từ bộ tài liệu dự án bằng
+# tools/build_warehouse.py) mount chỉ đọc tại /opt/airflow/warehouse, thư mục tools/ mount tại
+# /opt/airflow/tools. Biến DWH_WAREHOUSE_DIR đổi được thư mục này (tên cũ DWH_KIT_DIR vẫn dùng được).
 #
 #   docker compose exec airflow python /opt/airflow/tools/dwh_kit.py load 02_deposit
-#       Dựng lại bảng và dữ liệu test của case trong database dwh (cases/<case>/sql/01_create_tables.sql,
-#       02_load_test_data.sql), rồi xóa log của các DAG của case cho các ngày test trong log_db
+#       Dựng lại bảng và dữ liệu test của case trong database dwh (cases/<case>/ddl/01_create_tables.sql,
+#       data/02_load_test_data.sql), rồi xóa log của các DAG của case cho các ngày test trong log_db
 #       (dwh_ctrl.log_etl_table) để DAG layer 2 lại chờ DAG L1. Dùng khi chuyển giữa case 02 và 03
 #       (dùng chung bảng nguồn T24 LD) hoặc muốn chạy lại case từ đầu.
 #
@@ -15,10 +17,11 @@
 #       Sau khi trigger DAG cho các ngày test, với từng case:
 #       1. chép log của các DAG của case từ log_db sang dwh_ctrl.log_etl_table của database dwh
 #          (hàm QA dwh_ctrl.run_qa_automation đọc log ở đó để biết interface đã chạy xong);
-#       2. nạp lại test QA và kết quả mong đợi (sql/*_register_qa_scripts.sql, *_load_expected.sql);
-#       3. so bảng đích với kết quả mong đợi theo từng ngày, giống sql/*_check_expected.sql nhưng
-#          không so cột tf_run_id: DAG ghi run_id của Airflow (<dag_id>_manual__...), luồng dev của bộ
-#          tài liệu ghi 'manual';
+#       2. nạp lại test QA và kết quả mong đợi (cases/<case>/qa/*_register_qa_scripts.sql,
+#          qa/*_load_expected.sql);
+#       3. so bảng đích với kết quả mong đợi (cases/<case>/data/expected/*.csv) theo từng ngày, giống
+#          sql/*_check_expected.sql của bộ tài liệu nhưng không so cột tf_run_id: DAG ghi run_id của
+#          Airflow (<dag_id>_manual__...), luồng dev của bộ tài liệu ghi 'manual';
 #       4. chạy test QA cho từng ngày (dwh_ctrl.run_qa_automation).
 #       In bảng tổng kết giống local_pg/run_all.ps1; trả mã lỗi 1 nếu có case chưa đạt.
 # ---------------------------------------------------------------------------
@@ -31,7 +34,7 @@ from pathlib import Path
 
 import psycopg2
 
-KIT = Path(os.environ.get("DWH_KIT_DIR", "/opt/airflow/kit"))
+WAREHOUSE = Path(os.environ.get("DWH_WAREHOUSE_DIR") or os.environ.get("DWH_KIT_DIR") or "/opt/airflow/warehouse")
 IGNORED_COLUMNS = {"tf_run_id"}
 
 
@@ -49,7 +52,7 @@ def connect(dbname):
 
 
 def case_dirs(names):
-    dirs = sorted(p for p in (KIT / "cases").iterdir() if (p / "case.json").exists())
+    dirs = sorted(p for p in (WAREHOUSE / "cases").iterdir() if (p / "case.json").exists())
     if names:
         unknown = set(names) - {p.name for p in dirs}
         if unknown:
@@ -69,10 +72,10 @@ def run_sql_file(cur, path):
     cur.execute(path.read_text(encoding="utf-8"))
 
 
-def one_sql(case_dir, pattern):
-    files = sorted((case_dir / "sql").glob(pattern))
+def one_sql(case_dir, subdir, pattern):
+    files = sorted((case_dir / subdir).glob(pattern))
     if len(files) != 1:
-        raise SystemExit(f"{case_dir.name}: cần đúng một file sql/{pattern}, thấy {len(files)}")
+        raise SystemExit(f"{case_dir.name}: cần đúng một file {subdir}/{pattern}, thấy {len(files)}")
     return files[0]
 
 
@@ -82,9 +85,9 @@ def cmd_load(args):
     for case_dir in case_dirs(args.cases):
         cfg, dates, dag_ids = read_case(case_dir)
         with dwh.cursor() as cur:
-            for pattern in ("01_create_tables.sql", "02_load_test_data.sql"):
-                path = one_sql(case_dir, pattern)
-                print(f"[{case_dir.name}] dwh: {path.relative_to(KIT).as_posix()}")
+            for subdir, pattern in (("ddl", "01_create_tables.sql"), ("data", "02_load_test_data.sql")):
+                path = one_sql(case_dir, subdir, pattern)
+                print(f"[{case_dir.name}] dwh: {path.relative_to(WAREHOUSE).as_posix()}")
                 run_sql_file(cur, path)
         with ctrl.cursor() as cur:
             cur.execute("delete from dwh_ctrl.log_etl_table where project_name = 'dwh' and job_name = any(%s) "
@@ -160,7 +163,7 @@ def cmd_check(args):
             print(f"  log {day}: {states}")
         with dwh.cursor() as cur:
             for pattern in ("*_register_qa_scripts.sql", "*_load_expected.sql"):
-                run_sql_file(cur, one_sql(case_dir, pattern))
+                run_sql_file(cur, one_sql(case_dir, "qa", pattern))
             results = compare(cur, case_dir, cfg, dates)
             print(f"  So với kết quả mong đợi (không so {', '.join(sorted(IGNORED_COLUMNS))}):")
             print(f"    {'bảng':<38} {'ngày':<10} {'mong đợi':>8} {'thực tế':>8} {'thừa':>5} {'thiếu':>5}  kết quả")
@@ -197,8 +200,8 @@ def main():
     p_check = sub.add_parser("check", help="so bảng đích với kết quả mong đợi và chạy test QA")
     p_check.add_argument("cases", nargs="*", help="tên case (mặc định: tất cả)")
     args = parser.parse_args()
-    if not (KIT / "cases").is_dir():
-        sys.exit(f"Không thấy bộ tài liệu dự án tại {KIT}")
+    if not (WAREHOUSE / "cases").is_dir():
+        sys.exit(f"Không thấy thư mục warehouse tại {WAREHOUSE} (docker-compose.yaml mount ./warehouse)")
     {"load": cmd_load, "check": cmd_check}[args.command](args)
 
 

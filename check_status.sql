@@ -4,21 +4,35 @@
 --   docker compose cp check_status.sql postgres:/tmp/check_status.sql
 --   docker compose exec -T postgres psql -U airflow -d airflow -f /tmp/check_status.sql
 
-\echo '=== 1. DagRun gần nhất (success / failed / running / queued) ==='
+-- master_trigger_dag chạy 2 phút/lần nên không đưa vào bảng 1 và 2 (nó sẽ chiếm hết 20 dòng);
+-- số run của nó theo trạng thái xem ở bảng 1b.
+\echo '=== 1. DagRun gần nhất, trừ master_trigger_dag (running / queued lên đầu) ==='
 select dag_id, run_id, state,
        to_char(execution_date at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD HH24:MI') as logical_date_vn,
-       to_char(start_date at time zone 'Asia/Ho_Chi_Minh', 'HH24:MI:SS') as start_vn,
-       to_char(end_date at time zone 'Asia/Ho_Chi_Minh', 'HH24:MI:SS') as end_vn
+       to_char(start_date at time zone 'Asia/Ho_Chi_Minh', 'MM-DD HH24:MI:SS') as start_vn,
+       to_char(end_date at time zone 'Asia/Ho_Chi_Minh', 'MM-DD HH24:MI:SS') as end_vn
 from dag_run
-order by start_date desc nulls first
+where dag_id <> 'master_trigger_dag'
+order by (state in ('running', 'queued')) desc, start_date desc nulls first
 limit 20;
 
-\echo '=== 2. Task của các DagRun trên, gom theo trạng thái ==='
+\echo '=== 1b. master_trigger_dag: số run theo trạng thái, run gần nhất ==='
+select state, count(*) as runs,
+       to_char(max(start_date) at time zone 'Asia/Ho_Chi_Minh', 'MM-DD HH24:MI:SS') as last_start_vn
+from dag_run
+where dag_id = 'master_trigger_dag'
+group by state
+order by state;
+
+\echo '=== 2. Task của các DagRun ở bảng 1, gom theo trạng thái ==='
 select ti.dag_id, ti.run_id, coalesce(ti.state, 'none') as state, count(*) as tasks,
        string_agg(ti.task_id || case when ti.map_index >= 0 then '[' || ti.map_index || ']' else '' end,
                   ', ' order by ti.task_id, ti.map_index) as task_ids
 from task_instance ti
-join (select dag_id, run_id from dag_run order by start_date desc nulls first limit 20) r
+join (select dag_id, run_id from dag_run
+      where dag_id <> 'master_trigger_dag'
+      order by (state in ('running', 'queued')) desc, start_date desc nulls first
+      limit 20) r
   on r.dag_id = ti.dag_id and r.run_id = ti.run_id
 group by ti.dag_id, ti.run_id, ti.state
 order by ti.dag_id, ti.run_id, ti.state;

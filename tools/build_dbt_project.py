@@ -12,15 +12,18 @@
 #   models/sources.yml       gộp sources.yml của mọi case: mỗi nguồn một khối, bảng khai ở
 #                            nhiều case (bảng T24 LD của case 02 và 03) chỉ giữ một lần; thêm
 #                            hai nguồn mà macro futils_test_should_run đọc (LOCAL_SOURCES)
-#   models/schema.yml        gộp schema.yml của mọi case, giữ nguyên cấu hình và test
+#   models/schema.yml        gộp schema.yml của mọi case, giữ nguyên cấu hình và test; tham số
+#                            của generic test (filter_column, column_name...) lồng dưới
+#                            "arguments:", cách khai dbt hỗ trợ từ 1.10.5 (TEST_PROPERTIES)
 #   models/ngoai_pham_vi/    model giữ chỗ cho bảng do DAG khác dựng (khai trong schema.yml,
 #                            đọc bằng ref(), không có file .sql trong bộ tài liệu)
 # Hai phần cuối là thứ dbt project trung tâm có sẵn nhưng bộ tài liệu không mang theo.
 # Các file khác của dbt/dwh_project (dbt_project.yml, packages.yml) không bị đụng tới.
 #
-# Cách chạy (tại thư mục local_airflow, Python 3 của máy):
-#   py tools\build_dbt_project.py               dựng lại các thư mục trên
-#   py tools\build_dbt_project.py --check       chỉ so, báo file nào khác bộ tài liệu (mã lỗi 1)
+# Cách chạy (tại thư mục local_airflow, Python 3.12 của máy; "py -3.12" chọn đúng bản 3.12
+# khi máy cài nhiều bản Python):
+#   py -3.12 tools\build_dbt_project.py               dựng lại các thư mục trên
+#   py -3.12 tools\build_dbt_project.py --check       chỉ so, báo file nào khác bộ tài liệu (mã lỗi 1)
 # Sau khi dựng lại, sinh lại manifest trong container (xem README, mục "Sinh lại manifest").
 # ---------------------------------------------------------------------------
 import argparse
@@ -49,6 +52,14 @@ LOCAL_SOURCES = [
      "tables": [("raw_t24_holiday", "t24_holiday__snp",
                  "lịch ngày nghỉ T24, test có is_enable_holiday = false bỏ qua ngày nghỉ")]},
 ]
+
+# Khóa được giữ ở cấp trên của một generic test trong schema.yml: thuộc tính của test và cấu hình
+# test viết tắt (severity, where...). Mọi khóa khác là tham số của macro test, lồng dưới "arguments:".
+TEST_PROPERTIES = {
+    "arguments", "config", "name", "description",
+    "severity", "where", "limit", "tags", "enabled", "meta", "store_failures", "store_failures_as",
+    "warn_if", "error_if", "fail_calc", "database", "schema", "alias",
+}
 
 PLACEHOLDER = """/*
 *----------------------------------------------------------------------*
@@ -207,6 +218,81 @@ def parse_schema(path):
     return blocks
 
 
+def indent_of(line):
+    return len(line) - len(line.lstrip(" "))
+
+
+def is_content(line):
+    return bool(line.strip()) and not line.lstrip().startswith("#")
+
+
+def nest_test_body(body):
+    """Các dòng con của một generic test -> tham số lồng dưới "arguments:".
+
+    Giữ nguyên khi test đã có "arguments:", không có tham số, hoặc không theo mẫu "khóa: giá trị".
+    """
+    keyed = [line for line in body if is_content(line)]
+    if not keyed:
+        return body
+    key_indent = min(indent_of(line) for line in keyed)
+    chunks = []                                   # [khóa, các dòng]: dòng khóa và dòng con của nó
+    for line in body:
+        if is_content(line) and indent_of(line) == key_indent:
+            m = re.match(r"^\s*([\w-]+):", line)
+            if not m:
+                return body
+            chunks.append([m.group(1), [line]])
+        elif chunks:
+            chunks[-1][1].append(line)
+        else:
+            chunks.append([None, [line]])         # chú thích đứng trước khóa đầu tiên
+    keys = [key for key, _ in chunks]
+    if "arguments" in keys or all(key is None or key in TEST_PROPERTIES for key in keys):
+        return body
+    out, opened = [], False
+    for key, lines in chunks:
+        if key is None or key in TEST_PROPERTIES:
+            out.extend(lines)
+            continue
+        if not opened:
+            out.append(" " * key_indent + "arguments:")
+            opened = True
+        out.extend("  " + line if line.strip() else line for line in lines)
+    return out
+
+
+def nest_test_arguments(lines):
+    """Lồng tham số của mọi generic test (dưới tests: hoặc data_tests:) trong một khối model."""
+    out, tests_indent, i = [], None, 0
+    while i < len(lines):
+        line = lines[i]
+        if is_content(line) and tests_indent is not None:
+            ind = indent_of(line)
+            if ind < tests_indent or (ind == tests_indent and not line.lstrip().startswith("- ")):
+                tests_indent = None
+        if re.match(r"^\s*(tests|data_tests):\s*$", line):
+            tests_indent = indent_of(line)
+            out.append(line)
+            i += 1
+            continue
+        if tests_indent is not None and re.match(r"^\s*- [\w.]+:\s*$", line):
+            item_indent, j = indent_of(line), i + 1
+            while j < len(lines) and (not lines[j].strip() or indent_of(lines[j]) > item_indent):
+                j += 1
+            body = lines[i + 1:j]
+            trailing = []
+            while body and not body[-1].strip():
+                trailing.insert(0, body.pop())
+            out.append(line)
+            out.extend(nest_test_body(body))
+            out.extend(trailing)
+            i = j
+            continue
+        out.append(line)
+        i += 1
+    return out
+
+
 def render_schema(case_blocks, kit_rel):
     out = [
         "# ---------------------------------------------------------------------------",
@@ -214,6 +300,8 @@ def render_schema(case_blocks, kit_rel):
         f"# trong {kit_rel}/cases/<case>/dbt/ rồi chạy lại công cụ.",
         "# ---------------------------------------------------------------------------",
         "# Gộp schema.yml của mọi case: cấu hình (tag, schema, materialized) và test của từng model.",
+        "# Tham số của generic test (filter_column, column_name...) được lồng dưới \"arguments:\" theo",
+        "# cách khai dbt hỗ trợ từ 1.10.5; tên test và tham số giữ nguyên như schema.yml của case.",
         "# Model do DAG khác dựng (không có file .sql trong bộ tài liệu) có model giữ chỗ trong",
         f"# models/{LOCAL_DIR}/ để ref() phân giải được.",
         "# ---------------------------------------------------------------------------",
@@ -225,7 +313,7 @@ def render_schema(case_blocks, kit_rel):
         out.append(f"  # ===== Case {case} - {title} ({kit_rel}/cases/{case}/dbt/schema.yml)")
         out.append("")
         for block in blocks:
-            out.extend(block["lines"])
+            out.extend(nest_test_arguments(block["lines"]))
             out.append("")
     return "\n".join(out).rstrip() + "\n"
 
